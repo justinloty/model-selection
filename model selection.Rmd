@@ -1,0 +1,157 @@
+---
+title: "model selection"
+author: "Justin Lo"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE)
+```
+
+In this project, I explore methods of how to determine what models to select. I will be using the dataset of college in the ISLR package. I will be continuing from the nonlinear modeling project. Let's first revisit the models I have built in the nonlinear project. 
+
+```{r}
+library(ISLR)
+library(modelr)
+library(splines)
+college<-College
+
+quadratic_regression_model<- lm(Expend ~ poly(PhD, 2), data =college)
+summary(quadratic_regression_model)
+fitted_vals_quadratic <- predict(quadratic_regression_model, newdata = data.frame(PhD= 8:103))
+
+cubic_regression_model<- lm(Expend ~ poly(PhD,3), data=college)
+summary(cubic_regression_model)
+fitted_vals_cubic<- predict(cubic_regression_model, newdata = data.frame(PhD=8:103))
+
+cubic_spline_regression_model <- lm(Expend ~ bs(PhD, df = 4, degree = 3), data = College)
+summary(cubic_spline_regression_model)
+fitted_vals_spline <- predict(cubic_spline_regression_model, newdata = data.frame(PhD = 8:103))
+
+loess_regression_model<- loess(Expend ~ PhD, data = College, span = .4)
+summary(loess_regression_model)
+fitted_vals_loess <- predict(loess_regression_model, newdata = data.frame(PhD = 8:103))
+
+plot(College$PhD, College$Expend,
+     xlab = "Percentage of faculty with a PhD",
+     ylab = "Predicted Expenditure per Student")
+lines(8:103, fitted_vals_quadratic, col = "red")
+lines(8:103, fitted_vals_cubic, col = "blue")
+lines(8:103, fitted_vals_spline, col = "green")
+lines(8:103, fitted_vals_loess, col = "purple")
+```
+
+Now, to do basic comparison, I will first compare the rmse to see how much of the variability of the dataset is explained by the models.
+```{r}
+rmse(quadratic_regression_model, college)
+rmse(cubic_regression_model, college)
+rmse(cubic_spline_regression_model, college)
+rmse(loess_regression_model, college)
+```
+The results show that the loess_regression_model has the lowest rmse of 4163.094, second lowest being the cubic_spline_regression_model with a rmse of 4195.685, third lowest being the cubic_regression_model with a rmse of 4226.709 and the quadratic_regression_model has the highest rmse of 4296.624
+
+
+Now, I will split the data into training and testing set to perform leave-one-out cross validation(LOOCV)
+```{r, warning=FALSE}
+for(i in 1:nrow(college)){
+  
+  loocv_results <- data.frame(
+  Quadratic = numeric(nrow(college)), 
+  Cubic = numeric(nrow(college)), 
+  CubicSpline = numeric(nrow(college)), 
+  Loess = numeric(nrow(college))
+)
+  #splitting the dataset into training and testing data
+  test_data<- college[i,]
+  train_data<-college[-i,]
+  
+  #fitting the models
+  quadratic_regression_model <- lm(Expend ~ poly(PhD, 2), data = train_data)
+  cubic_regression_model <- lm(Expend ~ poly(PhD, 3), data = train_data)
+  cubic_spline_model <- lm(Expend ~ bs(PhD, df = 4, degree = 3), data = train_data)
+  loess_model <- loess(Expend ~ PhD, data = train_data, span = .4)
+  
+  #predicting the test data
+  pred_quadratic <- predict(quadratic_regression_model, newdata=test_data[c("PhD")])
+  pred_cubic <- predict(cubic_regression_model, newdata=test_data[c("PhD")])
+  pred_cubic_spline <- predict(cubic_spline_model, newdata=test_data[c("PhD")])
+  pred_loess <- predict(loess_model, newdata=test_data[c("PhD")])
+  
+  #calculating the square error and storing it in dataframe
+  loocv_results[i, "Quadratic"] <- (test_data$Expend - pred_quadratic)^2
+  loocv_results[i, "Cubic"] <- (test_data$Expend - pred_cubic)^2
+  loocv_results[i, "CubicSpline"] <- (test_data$Expend - pred_cubic_spline)^2
+  loocv_results[i, "Loess"] <- (test_data$Expend - pred_loess)^2
+} 
+
+#calculate the mean of squared errors for each model
+mean_quadratic <- mean(loocv_results$Quadratic)
+mean_cubic <- mean(loocv_results$Cubic)
+mean_cubic_spline <- mean(loocv_results$CubicSpline)
+mean_loess <- mean(loocv_results$Loess)
+
+mean_quadratic
+mean_cubic
+mean_cubic_spline
+mean_loess
+```
+This gives the mean squared error. The model with the lowest mean squared error is the cubic model with a mse of 17890.8, then the loess with a mse of 18510.3, then the cubic spline of 19630.52 and lastly with the highest mse, the quadratic with a mse of 23736.14
+
+
+Now, let's do K-fold valuation 
+```{r, warning=FALSE}
+# Split data into k folds 
+k <- 10
+folds <- cut(x=seq(1,nrow(college)),breaks=k,labels=FALSE)
+
+# Function to compute RMSE
+rmse <- function(actual, predicted){
+  sqrt(mean((actual - predicted)^2))
+}
+
+# Hold RMSE for each model
+rmse_vals <- matrix(NA, ncol=4, nrow=k)
+colnames(rmse_vals) <- c("Quadratic", "Cubic", "Cubic Spline", "Loess")
+
+# Cross validation loop
+for(i in 1:k){
+  # Create test and train sets
+  test_idx <- which(folds==i, arr.ind=TRUE)
+  test <- college[test_idx, ]
+  train <- college[-test_idx, ]
+  
+  # Fit models on train
+  quadratic_model <- lm(Expend ~ poly(PhD, 2), data = train)
+  cubic_model <- lm(Expend ~ poly(PhD,3), data = train)
+  spline_model <- lm(Expend ~ bs(PhD, df = 5, degree = 3), data = train) 
+  loess_model <- loess(Expend ~ PhD, data = train, span = .4)
+  
+  # Make predictions on test
+  quadratic_pred <- predict(quadratic_model, newdata = test)
+  cubic_pred <- predict(cubic_model, newdata = test)
+  spline_pred <- predict(spline_model, newdata = test)
+  loess_pred <- predict(loess_model, newdata = test)
+  
+  # Compute RMSE on test set
+  rmse_vals[i,1] <- rmse(test$Expend, quadratic_pred)
+  rmse_vals[i,2] <- rmse(test$Expend, cubic_pred)
+  rmse_vals[i,3] <- rmse(test$Expend, spline_pred) 
+  rmse_vals[i,4] <- rmse(test$Expend, loess_pred)
+}
+
+# Average RMSE across folds
+colMeans(rmse_vals)
+
+```
+The K-fold cross validation result shows that the cubic model has the lowest rmse of 4123.031 and then cublic spline with a rmse of 4132.689, then quadratic with 4197.195. 
+the loop gives NA to the loess model, it could be due to a few different reasons: it could be the fact that there isn't enough data to feed the loop, or it could be some extreme outliers. 
+
+In my own judgement, it seems like the cubic model fits the data the best and would be of best use for interpolation. 
+
+
+
+
